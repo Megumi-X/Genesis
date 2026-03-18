@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, Literal
+
+from pydantic import Field, model_validator
+
+from .actions import (
+    ActionIR,
+    SetDofsPositionActionIR,
+    SetDofsVelocityActionIR,
+    SetPoseActionIR,
+    SetTargetPosActionIR,
+    SetTorqueActionIR,
+)
+from .body import BodyIR, MJCFShapeIR, URDFShapeIR
+from .common import IR_VERSION, StrictModel, normalize_quat
+from .scene import SceneIR
+
+
+def _selected_entities(entity: str | tuple[str, ...] | None) -> tuple[str, ...]:
+    if entity is None:
+        return ()
+    if isinstance(entity, str):
+        return (entity,)
+    return entity
+
+
+class SingleRigidIR(StrictModel):
+    ir_version: Literal[IR_VERSION] = IR_VERSION
+    scene: SceneIR = Field(default_factory=SceneIR)
+    bodies: list[BodyIR] = Field(min_length=1)
+    actions: list[ActionIR] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_single_body_root(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        if "bodies" in value or "body" not in value:
+            return value
+        upgraded = dict(value)
+        upgraded["bodies"] = [upgraded.pop("body")]
+        return upgraded
+
+    @model_validator(mode="after")
+    def _check_references(self) -> "SingleRigidIR":
+        body_names: set[str] = set()
+        bodies_by_name: dict[str, BodyIR] = {}
+        articulated_bodies: list[BodyIR] = []
+        actuator_kind_by_entity: dict[str, dict[str, str]] = {}
+
+        for body in self.bodies:
+            if body.name in body_names:
+                raise ValueError(f"Duplicate body name: `{body.name}`.")
+            body_names.add(body.name)
+            bodies_by_name[body.name] = body
+            if self.scene.add_ground and body.name == "ground":
+                raise ValueError("Body name `ground` is reserved when `scene.add_ground=true`.")
+
+            is_articulated_shape = isinstance(body.shape, (MJCFShapeIR, URDFShapeIR))
+            if is_articulated_shape:
+                articulated_bodies.append(body)
+            if len(body.actuators) > 0 and not is_articulated_shape:
+                raise ValueError(f"`bodies[{body.name}].actuators` requires an articulated shape (`mjcf` or `urdf`).")
+
+            actuator_names: set[str] = set()
+            actuator_kind_by_name: dict[str, str] = {}
+            for actuator in body.actuators:
+                if actuator.name in actuator_names:
+                    raise ValueError(f"Duplicate actuator name `{actuator.name}` within body `{body.name}`.")
+                actuator_names.add(actuator.name)
+                actuator_kind_by_name[actuator.name] = actuator.kind
+                if actuator.joint_names is not None and not is_articulated_shape:
+                    raise ValueError(
+                        f"Actuator `{actuator.name}` on body `{body.name}` uses `joint_names`, but shape "
+                        f"`{body.shape.kind}` does not expose named articulated joints."
+                    )
+            actuator_kind_by_entity[body.name] = actuator_kind_by_name
+
+        if len(articulated_bodies) > 1:
+            articulated_names = [body.name for body in articulated_bodies]
+            raise ValueError(
+                "Current IR supports multiple primitive bodies plus at most one articulated body. "
+                f"Got articulated bodies {articulated_names}."
+            )
+
+        if not self.scene.add_ground and self.scene.ground_collision is not None:
+            raise ValueError("`scene.ground_collision` requires `scene.add_ground=true`.")
+
+        allowed_entities = set(body_names)
+        if self.scene.add_ground:
+            allowed_entities.add("ground")
+        if self.scene.render is not None and self.scene.render.follow_entity is not None:
+            follow_entity = self.scene.render.follow_entity.entity
+            if follow_entity not in allowed_entities:
+                raise ValueError(
+                    "`scene.render.follow_entity.entity` references unknown entity "
+                    f"`{follow_entity}`. Allowed entities: {sorted(allowed_entities)}."
+                )
+
+        current_step = 0
+        for index, action in enumerate(self.actions):
+            entity_selector = getattr(action, "entity", None)
+            for entity in _selected_entities(entity_selector):
+                if entity not in allowed_entities:
+                    raise ValueError(
+                        f"Action[{index}] references unknown entity `{entity}`. "
+                        f"Allowed entities: {sorted(allowed_entities)}."
+                    )
+
+            if isinstance(action, (SetPoseActionIR, SetDofsPositionActionIR, SetDofsVelocityActionIR)) and current_step > 0:
+                raise ValueError(
+                    f"Action[{index}] `{action.op}` is only allowed before simulation starts "
+                    "(i.e. before any `step` action advances time)."
+                )
+
+            if isinstance(action, (SetDofsPositionActionIR, SetDofsVelocityActionIR)):
+                target_body = bodies_by_name.get(action.entity)
+                if target_body is None:
+                    raise ValueError(
+                        f"Action[{index}] `{action.op}` requires a non-ground body entity, got `{action.entity}`."
+                    )
+                if action.joint_names is not None and not isinstance(target_body.shape, (MJCFShapeIR, URDFShapeIR)):
+                    raise ValueError(
+                        f"Action[{index}] uses `joint_names`, but body `{target_body.name}` with shape "
+                        f"`{target_body.shape.kind}` does not expose named articulated joints. Use `dofs_idx_local` instead."
+                    )
+
+            if isinstance(
+                action,
+                (
+                    SetTargetPosActionIR,
+                    SetTorqueActionIR,
+                ),
+            ):
+                if action.entity not in bodies_by_name:
+                    raise ValueError(
+                        f"Action[{index}] `{action.op}` requires a non-ground body entity, got `{action.entity}`."
+                    )
+                entity_actuator_kinds = actuator_kind_by_entity.get(action.entity, {})
+                if action.actuator not in entity_actuator_kinds:
+                    raise ValueError(
+                        f"Action[{index}] references unknown actuator `{action.actuator}` on entity `{action.entity}`. "
+                        f"Available actuators: {sorted(entity_actuator_kinds)}."
+                    )
+                actuator_kind = entity_actuator_kinds[action.actuator]
+                if isinstance(action, SetTargetPosActionIR) and actuator_kind != "position":
+                    raise ValueError(
+                        f"Action[{index}] `{action.op}` requires a `position` actuator, "
+                        f"but actuator `{action.actuator}` on `{action.entity}` is `{actuator_kind}`."
+                    )
+                if isinstance(action, SetTorqueActionIR) and actuator_kind != "motor":
+                    raise ValueError(
+                        f"Action[{index}] `{action.op}` requires a `motor` actuator, "
+                        f"but actuator `{action.actuator}` on `{action.entity}` is `{actuator_kind}`."
+                    )
+            if hasattr(action, "steps"):
+                current_step += int(action.steps)
+        return self
+
+
+def parse_ir_payload(payload: Mapping[str, Any] | SingleRigidIR) -> SingleRigidIR:
+    if isinstance(payload, SingleRigidIR):
+        return payload
+    return SingleRigidIR.model_validate(payload)
+
+
+def normalize_ir(program_or_payload: Mapping[str, Any] | SingleRigidIR) -> SingleRigidIR:
+    program = parse_ir_payload(program_or_payload).model_copy(deep=True)
+    for body in program.bodies:
+        body.initial_pose.quat = normalize_quat(body.initial_pose.quat)
+
+    for action in program.actions:
+        if isinstance(action, SetPoseActionIR) and action.quat is not None:
+            action.quat = normalize_quat(action.quat)
+
+    return program

@@ -154,3 +154,6 @@ uv.lock
 
 # alarm.yml outputs
 outputs/
+
+agent/runs
+agent/generated_assets

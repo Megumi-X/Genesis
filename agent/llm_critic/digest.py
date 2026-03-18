@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+from collections import Counter
+import json
+from pathlib import Path
+from typing import Any
+
+from ..tool_library import GeneratorParameterOverrides, build_generator_tool_context
+
+
+def load_optional_text(path: Path | None, *, max_chars: int = 50_000) -> dict[str, Any]:
+    if path is None:
+        return {"provided": False, "path": None, "text": None, "truncated": False}
+    if not path.exists():
+        raise ValueError(f"XML file not found: {path}")
+
+    text = path.read_text(encoding="utf-8")
+    truncated = len(text) > max_chars
+    if truncated:
+        text = text[:max_chars]
+    return {
+        "provided": True,
+        "path": str(path),
+        "text": text,
+        "truncated": truncated,
+    }
+
+
+def extract_first_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError("Empty LLM response.")
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("LLM response does not contain a valid JSON object.")
+    snippet = stripped[start : end + 1]
+    try:
+        parsed = json.loads(snippet)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Failed to parse JSON from LLM response: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM JSON response root is not an object.")
+    return parsed
+
+
+def ensure_sectioned_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    by_section = analysis.get("by_section")
+    if not isinstance(by_section, dict):
+        raise ValueError("Critic output missing `by_section` object.")
+    for key in ("scene", "actions"):
+        if key not in by_section or not isinstance(by_section.get(key), dict):
+            raise ValueError(f"Critic output missing `by_section.{key}` object.")
+    by_body = analysis.get("by_body")
+    if not isinstance(by_body, dict):
+        raise ValueError("Critic output missing `by_body` object.")
+    return analysis
+
+
+def build_input_digest(
+    *,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_info: dict[str, Any],
+    video_duration_sec: float | None,
+    sample_every_sec: float,
+    max_frames: int,
+    parameter_overrides: GeneratorParameterOverrides | None = None,
+) -> dict[str, Any]:
+    execution = event_pack.get("execution")
+    sim_duration_sec = None
+    if isinstance(execution, dict):
+        value = execution.get("final_time_sec")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            sim_duration_sec = float(value)
+
+    observation_count = None
+    observations = event_pack.get("observations")
+    if isinstance(observations, dict):
+        timeline = observations.get("timeline")
+        if isinstance(timeline, list):
+            observation_count = len(timeline)
+
+    return {
+        "task_prompt": task,
+        "generator_tool_context": build_generator_tool_context(
+            xml_generation_enabled=xml_info["provided"],
+            parameter_overrides=parameter_overrides,
+        ),
+        "video_meta": {
+            "video_path": str(event_pack.get("render", {}).get("video_path", "")),
+            "video_duration_sec": video_duration_sec,
+            "sample_every_sec": sample_every_sec,
+            "max_frames": max_frames,
+        },
+        "xml_meta": {
+            "provided": xml_info["provided"],
+            "path": xml_info["path"],
+            "truncated": xml_info["truncated"],
+        },
+        "supporting_metrics": {
+            "sim_duration_sec": sim_duration_sec,
+            "observation_count": observation_count,
+            "estimated_displacement_by_entity_m": _estimate_displacement_by_entity(event_pack),
+        },
+        "ir_digest": _build_ir_digest(ir),
+        "event_pack": event_pack,
+    }
+
+
+def _estimate_displacement_by_entity(event_pack: dict[str, Any]) -> dict[str, float]:
+    observations = event_pack.get("observations")
+    if not isinstance(observations, dict):
+        return {}
+    timeline_any = observations.get("timeline")
+    if not isinstance(timeline_any, list) or len(timeline_any) < 2:
+        return {}
+
+    first_by_entity: dict[str, dict[str, Any]] = {}
+    last_by_entity: dict[str, dict[str, Any]] = {}
+    for item in timeline_any:
+        if not isinstance(item, dict):
+            continue
+        entity = item.get("entity")
+        if not isinstance(entity, str) or not entity:
+            continue
+        first_by_entity.setdefault(entity, item)
+        last_by_entity[entity] = item
+
+    displacement_by_entity: dict[str, float] = {}
+    for entity, first in first_by_entity.items():
+        last = last_by_entity.get(entity)
+        if not isinstance(last, dict):
+            continue
+        first_state = first.get("state")
+        last_state = last.get("state")
+        if not isinstance(first_state, dict) or not isinstance(last_state, dict):
+            continue
+        first_pos = first_state.get("pos")
+        last_pos = last_state.get("pos")
+        if not isinstance(first_pos, list) or not isinstance(last_pos, list):
+            continue
+        if len(first_pos) < 3 or len(last_pos) < 3:
+            continue
+        try:
+            dx = float(last_pos[0]) - float(first_pos[0])
+            dy = float(last_pos[1]) - float(first_pos[1])
+            dz = float(last_pos[2]) - float(first_pos[2])
+        except Exception:  # noqa: BLE001
+            continue
+        displacement_by_entity[entity] = float((dx * dx + dy * dy + dz * dz) ** 0.5)
+    return displacement_by_entity
+
+
+def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
+    scene = ir.get("scene", {})
+    bodies_any = ir.get("bodies", [])
+    bodies = [body for body in bodies_any if isinstance(body, dict)] if isinstance(bodies_any, list) else []
+    if not bodies:
+        legacy_body = ir.get("body")
+        if isinstance(legacy_body, dict):
+            bodies = [legacy_body]
+    actions_any = ir.get("actions", [])
+    actions = [action for action in actions_any if isinstance(action, dict)] if isinstance(actions_any, list) else []
+
+    op_counter = Counter()
+    total_step_count = 0
+    for action in actions:
+        op = action.get("op")
+        if isinstance(op, str):
+            op_counter[op] += 1
+        if action.get("op") == "step":
+            steps = action.get("steps")
+            if isinstance(steps, int | float) and not isinstance(steps, bool):
+                total_step_count += int(steps)
+
+    return {
+        "scene": scene,
+        "bodies": bodies,
+        "body_count": len(bodies),
+        "articulated_body_names": [
+            body.get("name")
+            for body in bodies
+            if isinstance(body.get("shape"), dict) and body["shape"].get("kind") in {"mjcf", "urdf"}
+        ],
+        "actions_summary": {
+            "count": len(actions),
+            "op_counts": dict(sorted(op_counter.items())),
+            "total_step_count": total_step_count,
+        },
+        "raw_ir": ir,
+    }

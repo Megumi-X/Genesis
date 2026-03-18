@@ -1,0 +1,151 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from .video_sampler import SampledFrame
+
+
+CRITIC_SYSTEM_PROMPT = """You are a simulation critic for robotics/physics outputs.
+You will receive:
+1) a task prompt,
+2) the generated IR JSON,
+3) optional XML asset text,
+4) the raw event-pack JSON,
+5) sampled video frames in chronological order.
+
+Your job:
+- evaluate whether the output satisfies the task,
+- cross-check IR, XML, event-pack, and video evidence,
+- identify contradictions and uncertainty,
+- propose concrete fixes.
+- The IR may contain multiple bodies. Structure your critique by IR layers: global `scene`, global `actions`, and per-body analysis in `by_body`.
+- Prioritize overall task fulfillment, visible behavior, physical plausibility, and whether the robot does the right thing.
+- Do not let minor numeric discrepancies dominate the critique unless they clearly indicate a major behavioral problem, instability, or contradiction.
+- Read and use the provided generator tool-library descriptions, especially generation_guide constraints, parameter_notes, parameter_relationship_notes, and schema field descriptions.
+- When a major issue involves parameter tuning, use those descriptions to identify the likely root cause instead of giving vague advice. Distinguish between insufficient stiffness, insufficient damping, insufficient output limit, unstable restitution, camera-lag settings, and similar cases when the evidence supports it.
+- Keep `priority_fixes` focused on the few biggest issues blocking success, not on small cleanups.
+- Prefer a small number of major issues with detailed modifications over a long list of shallow comments.
+- In addition to correctness, consider IR conciseness (but not at the expense of clarity). If multiple actions can be merged into one equivalent multi-entity action without changing behavior, prefer that as the cleaner formulation. This is only a suggestion, but should not be used to determine success vs failure.
+- Base all suggested fixes on the provided generator tool-library capability only.
+- Respect any fixed parameter overrides exposed in the generator tool context; do not recommend changing them.
+- Do not suggest unavailable controllers, target-tracking systems, sensors, or new runtime abilities that the current tool library cannot express.
+- Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
+- Do not over-focus on duration alone; prioritize content correctness, physical plausibility, and control logic.
+- For each major issue, make the `fix` field concrete: name the IR field(s) or actuator setting(s) to adjust, the direction of change, and the intended effect on behavior.
+- Do not recommend verbose IR rewrites when a shorter equivalent IR is possible.
+
+Return ONLY a JSON object with this schema:
+{
+  "verdict": "pass" | "partial" | "fail",
+  "overall_score": 0-100,
+  "summary": string,
+  "by_section": {
+    "scene": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [
+        {
+          "severity": "high" | "medium" | "low",
+          "title": string,
+          "evidence": [string],
+          "fix": string
+        }
+      ]
+    },
+    "actions": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [
+        {
+          "severity": "high" | "medium" | "low",
+          "title": string,
+          "evidence": [string],
+          "fix": string
+        }
+      ]
+    }
+  },
+  "by_body": {
+    "<body_name>": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [
+        {
+          "severity": "high" | "medium" | "low",
+          "title": string,
+          "evidence": [string],
+          "fix": string
+        }
+      ]
+    }
+  },
+  "cross_checks": {
+    "ir_vs_event": string,
+    "event_vs_video": string,
+    "ir_vs_video": string
+  },
+  "priority_fixes": [string]
+}
+Use only provided evidence. Do not invent unseen details.
+"""
+
+
+def build_critic_prompt_cache_key() -> str:
+    digest = hashlib.sha1(CRITIC_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
+    return f"single_rigid_critic:{digest}"
+
+
+def build_critic_user_content(
+    *,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_text: str | None,
+    input_digest: dict[str, Any],
+    sampled_frames: list[SampledFrame],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "input_text",
+            "text": (
+                "Evaluate whether the simulation output satisfies the task.\n\n"
+                f"Task prompt:\n{task}\n\n"
+                "Raw IR JSON:\n"
+                f"{json.dumps(ir, ensure_ascii=False, indent=2)}\n\n"
+                "Raw XML text (optional):\n"
+                f"{xml_text if xml_text is not None else '<none provided>'}\n\n"
+                "Raw event-pack JSON:\n"
+                f"{json.dumps(event_pack, ensure_ascii=False, indent=2)}\n\n"
+                "Input digest (supporting summary and metadata, not the primary grading target):\n"
+                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}\n\n"
+                "The digest includes the generator tool-library capability summary. "
+                "You must constrain your fixes to that capability set. "
+                "Use the provided parameter notes, parameter relationship notes, and schema descriptions when deciding "
+                "which field is actually responsible for a major problem. "
+                "When there are multiple bodies, assign body-specific issues to `by_body` using the actual body names from the IR. "
+                "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
+                "to keep the IR shorter without changing behavior. "
+                "Do not let minor numeric mismatches in the digest outweigh clear overall behavioral evidence from the task, "
+                "video, and event trends.\n\n"
+                "The following images are sampled frames in chronological order."
+            ),
+        }
+    ]
+    for frame in sampled_frames:
+        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
+        content.append({"type": "input_image", "image_url": frame.data_url})
+    content.append(
+        {
+            "type": "input_text",
+            "text": (
+                "Now return the required JSON object using evidence from task, event-pack, and video frames. "
+                "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
+            ),
+        }
+    )
+    return content

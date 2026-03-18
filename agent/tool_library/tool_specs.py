@@ -1,0 +1,378 @@
+from __future__ import annotations
+
+from typing import Any
+
+from ..ir_schema import SingleRigidIR
+from ..llm_generator.constraints.general_constraints import ALLOWED_OBSERVE_FIELDS, default_render_config
+from .overrides import GeneratorParameterOverrides
+
+
+def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_generation_guide",
+                "description": "Return IR constraints, supported shape kinds, and planning notes.",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_observation_field_guide",
+                "description": "Return semantics of observe fields for primitive and articulated entities.",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_single_rigid_ir_schema",
+                "description": "Return full JSON schema for SingleRigidIR.",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "validate_ir",
+                "description": "Validate candidate IR and return normalized IR if valid.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_ir": {
+                            "type": "object",
+                            "description": "Candidate SingleRigidIR JSON object.",
+                        },
+                        "normalize": {
+                            "type": "boolean",
+                            "description": "Whether to quaternion-normalize before returning.",
+                            "default": True,
+                        },
+                        "target_sim_duration_sec": {
+                            "type": "number",
+                            "description": (
+                                "Optional target simulation duration in seconds "
+                                "(compared against final_step * scene.sim.dt)."
+                            ),
+                        },
+                        "sim_duration_tolerance_sec": {
+                            "type": "number",
+                            "description": "Optional allowed absolute simulation-duration error in seconds.",
+                        },
+                    },
+                    "required": ["candidate_ir"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    ]
+
+    if xml_generation_enabled:
+        specs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_articulated_xml",
+                    "description": "Generate MJCF XML for articulated body and return the asset path.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "xml_task": {
+                                "type": "string",
+                                "description": "Optional specialized XML generation instruction.",
+                            },
+                            "file_stem": {
+                                "type": "string",
+                                "description": "Optional output filename stem (without .xml).",
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+    return specs
+
+
+def build_generation_guide_payload(
+    *,
+    required_shape_kind: str | None,
+    required_shape_file: str | None,
+    allowed_shape_kinds: tuple[str, ...] | None,
+    allowed_articulated_joint_names: tuple[str, ...] | None,
+    enforce_articulated_actuator_control: bool,
+    target_sim_duration_sec: float | None,
+    duration_tolerance_sec: float,
+    xml_generation_enabled: bool,
+    generated_xml_path: str | None,
+    parameter_overrides: GeneratorParameterOverrides | None = None,
+) -> dict[str, Any]:
+    effective_dt = 0.01 if parameter_overrides is None or parameter_overrides.sim_dt is None else parameter_overrides.sim_dt
+    effective_render = default_render_config()
+    if parameter_overrides is not None:
+        if parameter_overrides.render_every_n_steps is not None:
+            effective_render["render_every_n_steps"] = parameter_overrides.render_every_n_steps
+        if parameter_overrides.render_res is not None:
+            effective_render["res"] = list(parameter_overrides.render_res)
+        if parameter_overrides.sim_dt is not None and parameter_overrides.render_every_n_steps is not None:
+            effective_render["fps"] = max(1, int(round(1.0 / (effective_dt * effective_render["render_every_n_steps"]))))
+
+    constraints: dict[str, Any] = {
+        "ir_version": "genesis.single_rigid.v1",
+        "allowed_shape_kinds": ["sphere", "box", "cylinder", "mjcf", "urdf"],
+        "multi_body_supported": True,
+        "root_structure_note": "Use top-level `bodies` list. The legacy single `body` object is deprecated.",
+        "body_count_policy": "Multiple bodies are allowed. At most one body may be articulated (mjcf or urdf).",
+        "body_naming_policy": "Each body.name must be unique. Actions refer to bodies through the `entity` field.",
+        "ir_conciseness_policy": (
+            "Prefer concise IR. If the same `observe`, `set_pose`, or `apply_external_wrench` should apply to multiple "
+            "bodies at the same moment with identical parameters, use one action with `entity` as a body-name list "
+            "instead of duplicating many near-identical actions."
+        ),
+        "fixed_body_support": True,
+        "fixed_body_note": (
+            "Use `bodies[].fixed=true` for static primitive or URDF objects such as obstacles, tables, and targets. "
+            "For MJCF bodies, encode a fixed base inside the XML itself. Input alias `static=true` is also accepted."
+        ),
+        "multi_entity_action_support": {
+            "observe": (
+                "Supports `entity` as a single body name or a list of body names; emits one observation event per body. "
+                "Use the list form when fields/tag/timing are identical."
+            ),
+            "set_pose": (
+                "Supports `entity` as a single body name or a list of body names; applies the same pose update to each "
+                "selected body. Use the list form when the same pose update should be broadcast."
+            ),
+            "apply_external_wrench": (
+                "Supports `entity` as a single body name or a list of body names; applies the same external wrench update "
+                "to each selected body. Use the list form when the same disturbance should be broadcast."
+            ),
+        },
+        "allowed_observe_fields": sorted(ALLOWED_OBSERVE_FIELDS),
+        "backend_default": "cpu",
+        "show_viewer_default": False,
+        "render_required": True,
+        "default_render_enabled": True,
+        "default_render_output_video": default_render_config()["output_video"],
+        "render_follow_entity_supported": True,
+        "recommended_articulated_action_ops": ["set_target_pos", "set_torque"],
+        "default_observation_policy": {
+            "final_step<=0": "require >=1 observe",
+            "0<final_step<100": "require >=2 observes, one pre-final and one at final step",
+            "final_step>=100": "require >=3 observes, with one intermediate and one at final step",
+        },
+    }
+    if required_shape_kind is not None:
+        constraints["required_shape_kind"] = required_shape_kind
+    if required_shape_file is not None:
+        constraints["required_shape_file"] = required_shape_file
+    if allowed_shape_kinds is not None:
+        constraints["enforced_allowed_shape_kinds"] = list(allowed_shape_kinds)
+    if allowed_articulated_joint_names is not None:
+        constraints["allowed_articulated_joint_names"] = list(allowed_articulated_joint_names)
+    if enforce_articulated_actuator_control:
+        constraints["articulated_motion_policy"] = {
+            "forbid_actions": ["set_pose", "set_dofs_position", "set_dofs_velocity"],
+            "require_articulated_body_actuators": True,
+            "require_at_least_one_actuator_control_action": True,
+            "actuator_type_rules": {
+                "position_actuator": ["set_target_pos"],
+                "motor_actuator": ["set_torque"],
+            },
+        }
+    constraints["pre_sim_only_actions"] = ["set_pose", "set_dofs_position", "set_dofs_velocity"]
+    if parameter_overrides is not None:
+        constraints["fixed_parameter_overrides"] = parameter_overrides.as_dict()
+        constraints["fixed_parameter_override_policy"] = (
+            "These parameters are fixed by the system. Treat them as hard constraints and do not try to "
+            "change or work around them."
+        )
+    constraints["parameter_notes"] = {
+        "scene.render.follow_entity.smoothing": (
+            "Follow-camera smoothing factor. Higher values make camera motion smoother but increase lag."
+        ),
+        "scene.render.follow_entity.fixed_axis": (
+            "Per-axis lock for follow-camera target position. Use null on an axis to follow the entity on that axis, "
+            "or set a number to keep that axis fixed."
+        ),
+        "bodies[].collision.coup_restitution": (
+            "Impact bounciness. Higher values create more rebound and usually make contact behavior less stable."
+        ),
+        "scene.ground_collision.friction": (
+            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact."
+        ),
+        "bodies[].collision.friction": (
+            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact."
+        ),
+        "bodies[].rho": (
+            "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size."
+        ),
+        "bodies[].shape.default_armature": (
+            "Additional articulated-joint armature used mainly for stability and numerical conditioning, not for "
+            "task-level motion design."
+        ),
+        "bodies[].fixed": (
+            "Whether a body is fixed/static in the world. Use this for primitive or URDF obstacles, tables, and props "
+            "that should not fall under gravity. For MJCF, express a fixed base in the XML itself. "
+            "Input alias `static` is also accepted."
+        ),
+        "bodies[].actuators[].kp": (
+            "Position-control stiffness. Increasing kp makes tracking more aggressive, but if it is too large the "
+            "joint can oscillate or destabilize."
+        ),
+        "bodies[].actuators[].kv": (
+            "Position-control damping. kv suppresses oscillation and overshoot; too little damping can be shaky, "
+            "too much can make motion sluggish."
+        ),
+        "bodies[].actuators[].force_range": (
+            "Actuator output limit. This caps the maximum available force/torque; if it is too small, the joint may "
+            "still be weak even when kp is large."
+        ),
+        "SetTargetPosActionIR.values": (
+            "Target positions for position actuators. These are desired setpoints, not direct joint-state writes."
+        ),
+        "SetTorqueActionIR.values": (
+            "Direct force/torque commands for motor actuators. These do not provide position tracking on their own."
+        ),
+        "ApplyExternalWrenchActionIR.force": (
+            "External force disturbance applied to a body or selected links. It is not an actuator command. Its "
+            "effect persists across subsequent step actions until another wrench update changes it."
+        ),
+        "ApplyExternalWrenchActionIR.torque": (
+            "External torque disturbance applied to a body or selected links. It is not an actuator command. Its "
+            "effect persists across subsequent step actions until another wrench update changes it."
+        ),
+        "ApplyExternalWrenchActionIR.ref": (
+            "Reference point used for the external wrench (`link_origin`, `link_com`, or `root_com`). This changes "
+            "how the same force produces translation versus rotation."
+        ),
+        "ApplyExternalWrenchActionIR.local": (
+            "Whether the force/torque vector is interpreted in the world frame (`false`) or the target link's local "
+            "frame (`true`)."
+        ),
+        "ObserveActionIR.entity": (
+            "May be a single body name or a list of body names. Use the list form when observing several bodies with "
+            "the same fields and tag at the same timestep."
+        ),
+        "SetPoseActionIR.entity": (
+            "May be a single body name or a list of body names. Use the list form when broadcasting the same pose "
+            "change to several bodies."
+        ),
+        "ApplyExternalWrenchActionIR.entity": (
+            "May be a single body name or a list of body names. Use the list form when broadcasting the same "
+            "external disturbance to several bodies."
+        ),
+    }
+    constraints["parameter_relationship_notes"] = {
+        "position_actuator_tuning": (
+            "For position actuators, kp sets how hard the controller tries to reach the target, kv damps motion, "
+            "and force_range caps the actual output. If motion is too weak or the target is not reached, the cause "
+            "may be insufficient kp, insufficient force_range, or both. If motion is too oscillatory, kp may be too "
+            "high, kv may be too low, or force_range may be large enough to expose that instability. Critiques and "
+            "fixes should distinguish between insufficient stiffness, insufficient damping, and insufficient output limit."
+        ),
+        "external_wrench_usage": (
+            "`apply_external_wrench` is best understood as writing an external disturbance state into the solver, not "
+            "as a one-step impulse helper. A common pattern is: set nonzero force/torque, step for some duration, then "
+            "set the wrench back to zero. Critiques and fixes should distinguish between too-small wrench magnitude, "
+            "too-short application duration, wrong reference point (`ref`), and wrong frame interpretation (`local`)."
+        )
+    }
+    if target_sim_duration_sec is not None:
+        constraints["target_sim_duration_sec"] = target_sim_duration_sec
+        constraints["sim_duration_tolerance_sec"] = duration_tolerance_sec
+        constraints["sim_duration_definition"] = "sim_duration_sec = final_step * scene.sim.dt"
+    constraints["xml_generation_is_available"] = xml_generation_enabled
+    if generated_xml_path is not None:
+        constraints["generated_xml_path"] = generated_xml_path
+
+    templates: dict[str, Any] = {
+        "minimal_scene": {
+            "backend": "cpu",
+            "show_viewer": False,
+            "add_ground": True,
+            "sim": {"dt": effective_dt, "gravity": [0.0, 0.0, -9.81]},
+            "render": effective_render,
+        },
+        "minimal_bodies": [
+            {
+                "name": "robot",
+                "shape": {"kind": "mjcf", "file": "path/to/model.xml", "scale": 1.0},
+            },
+            {
+                "name": "target_box",
+                "fixed": True,
+                "shape": {"kind": "box", "size": [0.3, 0.3, 0.3]},
+                "initial_pose": {"pos": [1.0, 0.0, 0.15], "quat": [1.0, 0.0, 0.0, 0.0]},
+            },
+        ],
+        "render_follow_entity_example": {
+            "render": {
+                **effective_render,
+                "follow_entity": {
+                    "entity": "robot",
+                    "fixed_axis": [None, None, 0.8],
+                    "smoothing": 0.9,
+                    "fix_orientation": False,
+                },
+            }
+        },
+        "multi_entity_observe_example": {
+            "op": "observe",
+            "entity": ["striker", "domino_01", "domino_02"],
+            "fields": ["pos", "quat", "vel", "ang"],
+            "tag": "early_state_multi",
+        },
+        "shapes": {
+            "sphere": {"kind": "sphere", "radius": 0.2},
+            "box": {"kind": "box", "size": [0.4, 0.3, 0.2]},
+            "cylinder": {"kind": "cylinder", "radius": 0.1, "height": 0.4},
+            "mjcf": {"kind": "mjcf", "file": "path/to/model.xml", "scale": 1.0},
+            "urdf": {"kind": "urdf", "file": "path/to/model.urdf", "scale": 1.0},
+        },
+        "articulated_actuator_setup": {
+            "body_actuators_example": [
+                {"kind": "position", "name": "joint0_pos", "dofs_idx_local": [0], "kp": 80.0, "kv": 6.0},
+                {
+                    "kind": "motor",
+                    "name": "joint1_motor",
+                    "dofs_idx_local": [1],
+                    "force_range": {"lower": -200.0, "upper": 200.0},
+                },
+            ],
+            "actions_example": [
+                {"op": "set_target_pos", "entity": "robot", "actuator": "joint0_pos", "values": [0.8]},
+                {"op": "set_torque", "entity": "robot", "actuator": "joint1_motor", "values": [30.0]},
+                {"op": "step", "steps": 120},
+                {
+                    "op": "observe",
+                    "entity": "robot",
+                    "fields": ["qpos", "dofs_position", "dofs_velocity"],
+                    "tag": "after_control",
+                },
+            ],
+        },
+    }
+
+    return {"ok": True, "mode": "general_single_rigid", "constraints": constraints, "templates": templates}
+
+
+def build_observation_field_guide_payload() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "fields": {
+            "pos": {"meaning": "world-frame position of body origin", "dimension": 3},
+            "quat": {"meaning": "world-frame orientation quaternion (w,x,y,z)", "dimension": 4},
+            "vel": {"meaning": "world-frame linear velocity", "dimension": 3},
+            "ang": {"meaning": "world-frame angular velocity", "dimension": 3},
+            "qpos": {"meaning": "generalized joint position state (articulated only)", "dimension": "N"},
+            "dofs_position": {"meaning": "local dof positions (articulated only)", "dimension": "N"},
+            "dofs_velocity": {"meaning": "local dof velocities (articulated only)", "dimension": "N"},
+        },
+    }
+
+
+def build_schema_payload() -> dict[str, Any]:
+    return {"ok": True, "schema": SingleRigidIR.model_json_schema()}
