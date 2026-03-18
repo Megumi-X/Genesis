@@ -199,10 +199,7 @@ class Visualizer(RBC):
         if force:  # force update
             self.reset()
         elif self._viewer is not None:
-            if self._viewer.is_alive():
-                self._viewer.update(auto_refresh=auto, force=force)
-            else:
-                gs.raise_exception("Viewer closed.")
+            self._viewer.update(auto_refresh=auto, force=force)
 
     def update_visual_states(self, force_render: bool = False):
         """
@@ -266,6 +263,17 @@ class Visualizer(RBC):
     @property
     def rasterizer(self):
         return self._rasterizer
+
+    @property
+    @gs.assert_built
+    def is_software(self):
+        if self._batch_renderer is not None or self._raytracer is not None:
+            return False
+        if self._viewer is not None:
+            assert self._viewer._pyrender_viewer is not None
+            return self._viewer._pyrender_viewer._is_software
+        assert self._rasterizer is not None and self._rasterizer._renderer is not None
+        return self._rasterizer._renderer._is_software
 
     @property
     def batch_renderer(self):

@@ -1,4 +1,3 @@
-import os
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -7,6 +6,7 @@ import torch
 from frozendict import frozendict
 
 import genesis as gs
+
 import genesis.utils.array_class as array_class
 import genesis.utils.geom as gu
 from genesis.engine.solvers.rigid.abd import func_solve_mass_batch
@@ -31,7 +31,9 @@ class ConstraintSolver:
         self._para_level = rigid_solver._para_level
 
         self._solver_type = rigid_solver._options.constraint_solver
-        self.iterations = rigid_solver._options.iterations
+        self._n_iterations = int(
+            rigid_solver._options.iterations
+        )  # Python-native; passed to Python-scope functions to avoid CPU-GPU sync
         self.tolerance = rigid_solver._options.tolerance
         self.ls_iterations = rigid_solver._options.ls_iterations
         self.ls_tolerance = rigid_solver._options.ls_tolerance
@@ -192,6 +194,7 @@ class ConstraintSolver:
             self.constraint_state,
             self._solver._rigid_global_info,
             self._solver._static_rigid_sim_config,
+            self._n_iterations,
         )
 
         func_update_qacc(
@@ -212,13 +215,28 @@ class ConstraintSolver:
         )
 
     def noslip(self):
-        constraint_noslip.kernel_build_efc_AR_b(
-            self._solver.dofs_state,
-            self._solver.entities_info,
-            self._solver._rigid_global_info,
-            self.constraint_state,
-            self._solver._static_rigid_sim_config,
-        )
+        if self._solver._para_level >= gs.PARA_LEVEL.PARTIAL:
+            # GPU (any n_envs): split into Phase 1 (parallel M^{-1} solve) + Phase 2 (parallel AR build)
+            constraint_noslip.kernel_compute_MinvJT(
+                self._solver.entities_info,
+                self._solver._rigid_global_info,
+                self.constraint_state,
+                self._solver._static_rigid_sim_config,
+            )
+            constraint_noslip.kernel_compute_AR_and_b(
+                self._solver.dofs_state,
+                self.constraint_state,
+                self._solver._static_rigid_sim_config,
+            )
+        else:
+            # CPU: use original fused kernel (no overhead)
+            constraint_noslip.kernel_build_efc_AR_b(
+                self._solver.dofs_state,
+                self._solver.entities_info,
+                self._solver._rigid_global_info,
+                self.constraint_state,
+                self._solver._static_rigid_sim_config,
+            )
 
         constraint_noslip.kernel_noslip(
             self._collider._collider_state,
@@ -3032,6 +3050,7 @@ def func_solve_body(
     constraint_state: array_class.ConstraintState,
     rigid_global_info: array_class.RigidGlobalInfo,
     static_rigid_sim_config: qd.template(),
+    _n_iterations: int,
 ) -> None: ...
 
 
@@ -3043,6 +3062,7 @@ def func_solve_body_monolith(
     constraint_state: array_class.ConstraintState,
     rigid_global_info: array_class.RigidGlobalInfo,
     static_rigid_sim_config: qd.template(),
+    _n_iterations: int,
 ):
     _B = constraint_state.grad.shape[1]
 

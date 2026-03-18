@@ -30,11 +30,13 @@ try:
     has_tkinter = True
 except ImportError:
     tkinter = type(sys)("tkinter")
+    tkinter.filedialog = lambda *arg, **kwargs: None
+    tkinter.mainloop = type(sys)("mainloop")
+    tkinter.mainloop.__code__ = ""
     tkinter.Tk = type(sys)("Tk")
-    tkinter.filedialog = type(sys)("filedialog")
+    tkinter.Misc = type(sys)("Misc")
+    tkinter.Misc.mainloop = tkinter.mainloop
     sys.modules["tkinter"] = tkinter
-    sys.modules["tkinter.Tk"] = tkinter.Tk
-    sys.modules["tkinter.filedialog"] = tkinter.filedialog
 
 # Determine whether a screen is available
 if has_tkinter:
@@ -78,6 +80,27 @@ TOL_DOUBLE = 1e-9
 IMG_STD_ERR_THR = 1.0
 IMG_NUM_ERR_THR = 0.001
 IMG_BLUR_KERNEL_SIZE = 1  # Size of the blur kernel (must be odd)
+
+
+# Canonical skip reason registry.
+# When a test is skipped during setup with one of these reasons, the skip trace location is
+# normalized to point to the definition line below instead of scattered test function locations.
+# This makes the short test summary group identical skip reasons into a single line.
+_CANONICAL_SKIP_LINES = {}
+
+
+def _skip_reason(reason):
+    _CANONICAL_SKIP_LINES[reason] = sys._getframe(1).f_lineno
+    return reason
+
+
+SKIP_NO_GPU = _skip_reason("No GPU available on this machine")
+SKIP_METAL_64BIT = _skip_reason("Apple Metal GPU does not support 64bits precision.")
+SKIP_BACKEND_UNAVAILABLE = _skip_reason("Backend not available on this machine")
+SKIP_NO_MADRONA = _skip_reason("BatchRenderer is not supported because 'gs_madrona' is not available.")
+SKIP_NO_LUISA = _skip_reason("RayTracer is not supported because 'LuisaRenderPy' is not available.")
+SKIP_NO_VIEWER = _skip_reason("Interactive viewer not supported on this platform.")
+SKIP_NO_OMNIVERSE_KIT = _skip_reason("omniverse-kit support not available")
 
 
 def is_mem_monitoring_supported():
@@ -399,6 +422,31 @@ def pytest_runtest_setup(item):
                     pass
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Normalize skip trace locations so identical reasons stack into a single summary line.
+
+    By default, pytest attributes setup-phase skips to the test item's location, scattering
+    identical reasons across many lines. This hook rewrites the location to the canonical
+    definition line in conftest.py for all registered skip reasons.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.skipped and isinstance(report.longrepr, tuple):
+        _, _, reason = report.longrepr
+        # pytest may prefix the reason with "Skipped: " — strip it for matching
+        bare_reason = reason.removeprefix("Skipped: ")
+        lineno = _CANONICAL_SKIP_LINES.get(bare_reason)
+        if (
+            lineno is None
+            and bare_reason.startswith("Backend '")
+            and bare_reason.endswith("' not available on this machine")
+        ):
+            lineno = _CANONICAL_SKIP_LINES[SKIP_BACKEND_UNAVAILABLE]
+        if lineno is not None:
+            report.longrepr = (os.path.relpath(__file__), lineno, reason)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--backend", action="store", default=None, help="Default simulation backend.")
     parser.addoption(
@@ -414,15 +462,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         else SUPPRESS
     )
     parser.addoption("--mem-monitoring-filepath", type=str, help=help_text)
+    parser.addoption(
+        "--speed-test-filepath",
+        type=str,
+        default="speed_test.txt",
+        help="Base filepath for speed test reports (default: speed_test.txt).",
+    )
     if os.environ.get("GS_PROFILING", "0") == "1":
         profiling.parser_add_options(parser)
 
 
 # Note: moving this out of conftest.py, e.g. into profiling.py, does not appear to work.
-@pytest.fixture(scope="session")
-def pytorch_profiler_step(pytestconfig):
+@pytest.fixture(scope="function")
+def pytorch_profiler_step(pytestconfig, request):
     if os.environ.get("GS_PROFILING", "0") == "1":
-        for res in profiling.pytorch_profiler(pytestconfig):
+        for res in profiling.pytorch_profiler(pytestconfig, request):
             yield res
     else:
         noop = lambda: None  # noqa: E731
@@ -606,6 +660,9 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
         monkeypatch.setenv("GS_CACHE_FILE_PATH", str(tmp_path / ".cache" / "genesis"))
         monkeypatch.setenv("GS_ENABLE_FASTCACHE", "0")
 
+    # Avoid numba cache collision
+    monkeypatch.setenv("NUMBA_CACHE_DIR", str(tmp_path / ".cache" / "numba"))
+
     # Redirect name terrain cache directory to some test-local temporary location to avoid conflict and persistence
     monkeypatch.setattr("genesis.utils.misc.get_gnd_cache_dir", lambda: str(tmp_path / ".cache" / "terrain"))
 
@@ -619,7 +676,7 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
         # Skip test if not supported by this machine
         if sys.platform == "darwin" and backend != gs.cpu:
             if os.environ.get("QD_ENABLE_METAL", "1") != "0" and precision == "64":
-                pytest.skip("Apple Metal GPU does not support 64bits precision.")
+                pytest.skip(SKIP_METAL_64BIT)
 
         gs.init(
             backend=backend,
@@ -636,7 +693,7 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
                 raise RuntimeError(f"Invalid CUDA GPU device, got {gs.device.index}, expected {_get_gpu_indices()}.")
 
         if backend != gs.cpu and gs.backend == gs.cpu:
-            pytest.skip("No GPU available on this machine")
+            pytest.skip(SKIP_NO_GPU)
 
         yield
     finally:
@@ -647,9 +704,7 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
 
 
 @pytest.fixture
-def mj_sim(
-    xml_path, gs_solver, gs_integrator, merge_fixed_links, multi_contact, adjacent_collision, dof_damping, gjk_collision
-):
+def mj_sim(xml_path, gs_solver, gs_integrator, merge_fixed_links, multi_contact, adjacent_collision, gjk_collision):
     from .utils import build_mujoco_sim
 
     return build_mujoco_sim(
@@ -659,7 +714,6 @@ def mj_sim(
         merge_fixed_links,
         multi_contact,
         adjacent_collision,
-        dof_damping,
         gjk_collision,
     )
 
@@ -792,15 +846,18 @@ class PixelMatchSnapshotExtension(PNGImageSnapshotExtension):
         # Compute difference on blurred images
         img_err = np.minimum(np.abs(blurred_arrays[1] - blurred_arrays[0]), 255).astype(np.uint8)
 
-        if (
-            np.max(np.std(img_err.reshape((-1, img_err.shape[-1])), axis=0)) > self._std_err_threshold
-            and (np.abs(img_err) > np.finfo(np.float32).eps).sum() > self._ratio_err_threshold * img_err.size
-        ):
+        std_err = np.max(np.std(img_err.reshape((-1, img_err.shape[-1])), axis=0))
+        ratio_err = (np.abs(img_err) > np.finfo(np.float32).eps).sum()
+        if std_err > self._std_err_threshold and ratio_err > self._ratio_err_threshold * img_err.size:
             raw_bytes = BytesIO()
             img_delta = np.minimum(np.abs(img_arrays[1] - img_arrays[0]), 255).astype(np.uint8)
             img_obj = Image.fromarray(img_delta.squeeze(-1) if img_delta.shape[-1] == 1 else img_delta)
             img_obj.save(raw_bytes, "PNG")
             raw_bytes.seek(0)
+            print(
+                f"PNG snapshot mismatch [std_err={std_err:.2f} (thr={self._std_err_threshold:.2f}), "
+                f"ratio_err={ratio_err} (thr={self._ratio_err_threshold * img_err.size})]:"
+            )
             print(base64.b64encode(raw_bytes.read()))
             return False
         return True

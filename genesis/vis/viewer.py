@@ -150,7 +150,17 @@ class Viewer(RBC):
             self._pyrender_viewer.close()
 
     def is_alive(self):
-        return self._pyrender_viewer is not None and self._pyrender_viewer.is_active
+        if self._pyrender_viewer is None:
+            return False
+        if self._pyrender_viewer._exception is not None:
+            if self._pyrender_viewer.is_active:
+                try:
+                    self._pyrender_viewer.close()
+                except Exception:
+                    pass
+                gs.raise_exception_from("Unexpected OpenGL context error.", self._pyrender_viewer._exception)
+            return False
+        return self._pyrender_viewer.is_active
 
     def setup_camera(self):
         yfov = self._camera_fov / 180.0 * np.pi
@@ -159,6 +169,9 @@ class Viewer(RBC):
         self._camera_node = self.context.add_node(pyrender.PerspectiveCamera(yfov=yfov), pose=pose)
 
     def update(self, auto_refresh=None, force=False):
+        if not self.is_alive():
+            gs.raise_exception("Viewer closed.")
+
         if self._followed_entity is not None:
             self.update_following()
 
@@ -183,8 +196,18 @@ class Viewer(RBC):
     def close_offscreen(self, render_target):
         return self._pyrender_viewer.close_offscreen(render_target)
 
-    def render_offscreen(self, camera_node, render_target, rgb=True, depth=False, seg=False, normal=False):
-        return self._pyrender_viewer.render_offscreen(camera_node, render_target, rgb, depth, seg, normal)
+    def render_offscreen(
+        self, camera_node, render_target, rgb=True, depth=False, seg=False, normal=False, skip_markers=False
+    ):
+        return self._pyrender_viewer.render_offscreen(
+            camera_node,
+            render_target,
+            rgb,
+            depth,
+            seg,
+            normal,
+            skip_markers=skip_markers,
+        )
 
     def set_camera_pose(self, pose=None, pos=None, lookat=None):
         """
@@ -271,7 +294,7 @@ class Viewer(RBC):
             self.set_camera_pose(pos=camera_pos, lookat=self._follow_lookat)
 
     @gs.assert_built
-    def register_keybinds(self, *keybinds: Keybind) -> None:
+    def register_keybinds(self, /, *keybinds: Keybind, overwrite: bool = False) -> None:
         """
         Register a callback function to be called when a key is pressed.
 
@@ -280,7 +303,7 @@ class Viewer(RBC):
         keybinds : Keybind
             One or more Keybind objects to register. See Keybind documentation for usage.
         """
-        self._pyrender_viewer.register_keybinds(*keybinds)
+        self._pyrender_viewer.register_keybinds(*keybinds, overwrite=overwrite)
 
     @gs.assert_built
     def remap_keybind(

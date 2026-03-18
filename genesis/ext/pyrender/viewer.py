@@ -357,7 +357,15 @@ class Viewer(pyglet.window.Window):
             self._message_text = None
             self._ticks_till_fade = 2.0 / 3.0 * self.viewer_flags["refresh_rate"]
             self._message_opac = 1.0 + self._ticks_till_fade
-            self.register_keybinds(Keybind(HELP_TEXT_KEYBIND_NAME, HELP_TEXT_KEY, callback=self._toggle_instructions))
+            self.register_keybinds(
+                Keybind(
+                    HELP_TEXT_KEYBIND_NAME,
+                    HELP_TEXT_KEY,
+                    callback=self._toggle_instructions,
+                    protected=True,
+                    allow_overload=True,
+                )
+            )
 
         # Setup viewer plugins
         self.plugins: list[ViewerPlugin] = []
@@ -508,7 +516,7 @@ class Viewer(pyglet.window.Window):
         # Register pyglet.window event handlers from the plugin
         self.push_handlers(plugin)
 
-    def register_keybinds(self, *keybinds: Keybind) -> None:
+    def register_keybinds(self, /, *keybinds: Keybind, overwrite: bool = False) -> None:
         """
         Add a key handler to call a function when the given key is pressed.
 
@@ -518,7 +526,7 @@ class Viewer(pyglet.window.Window):
             One or more Keybind objects to register.
         """
         for keybind in keybinds:
-            self._keybindings.register(keybind)
+            self._keybindings.register(keybind, overwrite)
         self._update_instr_texts()
 
     def remap_keybind(
@@ -682,7 +690,9 @@ class Viewer(pyglet.window.Window):
             # Force close renderer synchronously
             self._event_loop_step_offscreen()
 
-    def render_offscreen(self, camera_node, render_target, rgb=True, depth=False, seg=False, normal=False):
+    def render_offscreen(
+        self, camera_node, render_target, rgb=True, depth=False, seg=False, normal=False, skip_markers=False
+    ):
         if not self.is_active:
             gs.raise_exception("Viewer already closed.")
 
@@ -691,7 +701,7 @@ class Viewer(pyglet.window.Window):
         self.render_flags["rgb"] = rgb
         self.render_flags["seg"] = seg
         self.render_flags["depth"] = depth
-        self._offscreen_pending_render = (camera_node, render_target, normal)
+        self._offscreen_pending_render = (camera_node, render_target, normal, skip_markers)
         if self._run_in_thread:
             # Send offscreen request
             self._offscreen_event.set()
@@ -728,7 +738,7 @@ class Viewer(pyglet.window.Window):
 
             if self._offscreen_pending_render is not None:
                 # Extract request right away
-                camera, target, normal = self._offscreen_pending_render
+                camera, target, normal, skip_markers = self._offscreen_pending_render
                 self._offscreen_pending_render = None
 
                 # Update context, just in case is not already done before
@@ -738,10 +748,12 @@ class Viewer(pyglet.window.Window):
                 # Render current frame from camera viewpoint
                 self._offscreen_results = []
                 self.render_flags["offscreen"] = True
+                self.render_flags["skip_markers"] = skip_markers
                 self.clear()
                 retval = self._render(camera, target, normal)
                 self._offscreen_result = retval if retval else (None, None)
                 self.render_flags["offscreen"] = False
+                self.render_flags["skip_markers"] = False
 
             if self._run_in_thread:
                 self._offscreen_semaphore.release()
@@ -863,9 +875,10 @@ class Viewer(pyglet.window.Window):
 
     def on_key_press(self, symbol: int, modifiers: int) -> EVENT_HANDLE_STATE:
         """Record a key press."""
-        self._held_keys[(symbol, modifiers)] = True
+        if (symbol, modifiers) not in self._held_keys:
+            self._call_keybind_callback(symbol, modifiers, KeyAction.PRESS)
 
-        self._call_keybind_callback(symbol, modifiers, KeyAction.PRESS)
+        self._held_keys[(symbol, modifiers)] = True
 
     def on_key_release(self, symbol: int, modifiers: int) -> EVENT_HANDLE_STATE:
         """Record a key release."""
@@ -1019,6 +1032,8 @@ class Viewer(pyglet.window.Window):
 
         if self.render_flags["offscreen"]:
             flags |= RenderFlags.OFFSCREEN
+        if self.render_flags.get("skip_markers", False):
+            flags |= RenderFlags.SKIP_MARKERS
 
         seg_node_map = None
         if self.render_flags["seg"]:
@@ -1056,6 +1071,8 @@ class Viewer(pyglet.window.Window):
             flags = RenderFlags.FLAT | RenderFlags.OFFSCREEN
             if self.render_flags["env_separate_rigid"]:
                 flags |= RenderFlags.ENV_SEPARATE
+            if self.render_flags.get("skip_markers", False):
+                flags |= RenderFlags.SKIP_MARKERS
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             normal_arr, *_ = renderer.render(scene, flags, is_first_pass=False)
             retval = (*retval, normal_arr)
@@ -1356,7 +1373,7 @@ class Viewer(pyglet.window.Window):
             # f"{'[' + get_keycode_string(kb.key_code):>{7}}]: " + kb.name.replace("_", " ")
             f"{'[' + str(kb.key):>{7}}]: " + kb.name.replace("_", " ")
             for kb in self._keybindings.keybinds
-            if kb.name != HELP_TEXT_KEYBIND_NAME and kb.key_action != KeyAction.RELEASE
+            if kb.name != HELP_TEXT_KEYBIND_NAME
         ]
 
     def _toggle_instructions(self):
