@@ -4,9 +4,9 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from ..ir_schema import SingleRigidIR, parse_ir_payload
+from ..ir_schema import RigidIR, parse_ir_payload
 
-LLM_EVENT_PACK_VERSION = "genesis.single_rigid.event_pack.v2"
+LLM_EVENT_PACK_VERSION = "genesis.rigid.event_pack.v1"
 
 
 def _is_number(value: Any) -> bool:
@@ -87,7 +87,7 @@ def _event_derived(event: Mapping[str, Any]) -> dict[str, Any]:
     return _clean_none_fields(derived)
 
 
-def _planned_step_after_each_action(program: SingleRigidIR) -> tuple[list[dict[str, int]], int]:
+def _planned_step_after_each_action(program: RigidIR) -> tuple[list[dict[str, int]], int]:
     step_cursor = 0
     timeline: list[dict[str, int]] = []
 
@@ -107,7 +107,7 @@ def _planned_step_after_each_action(program: SingleRigidIR) -> tuple[list[dict[s
 
 
 def _build_action_trace(
-    program: SingleRigidIR,
+    program: RigidIR,
     dt: float,
     observation_indices_by_action: dict[int, list[int]],
 ) -> tuple[list[dict[str, Any]], int]:
@@ -139,7 +139,7 @@ def _build_action_trace(
 
 
 def build_llm_event_pack(
-    program_or_payload: Mapping[str, Any] | SingleRigidIR,
+    program_or_payload: Mapping[str, Any] | RigidIR,
     run_result: Mapping[str, Any],
 ) -> dict[str, Any]:
     program = parse_ir_payload(program_or_payload)
@@ -365,7 +365,4 @@ def build_llm_event_pack(
         },
         "highlights": highlights,
     }
-    if len(entities_summary) == 1:
-        only_name, only_summary = next(iter(entities_summary.items()))
-        result["entity"] = {"name": only_name, **only_summary}
     return result

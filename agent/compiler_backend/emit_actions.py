@@ -11,7 +11,7 @@ from ..ir_schema import (
     SetPoseActionIR,
     SetTargetPosActionIR,
     SetTorqueActionIR,
-    SingleRigidIR,
+    RigidIR,
     StepActionIR,
 )
 from .formatting import fmt_int_tuple, fmt_str_tuple, fmt_tuple, fmt_vec3
@@ -20,7 +20,7 @@ from .formatting import fmt_int_tuple, fmt_str_tuple, fmt_tuple, fmt_vec3
 def emit_action_loop(
     emit: Callable[[int, str], None],
     *,
-    program: SingleRigidIR,
+    program: RigidIR,
     render: RenderIR | None,
     entity_vars: dict[str, str],
 ) -> None:

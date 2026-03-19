@@ -184,8 +184,8 @@ class BodyIR(StrictModel):
     fixed: bool = Field(
         default=False,
         description=(
-            "Whether this body should be fixed/static in the world. Use this for obstacles, tables, platforms, "
-            "or anchored articulated bodies. Input alias `static` is also accepted."
+            "Whether this body should be fixed in the world. Use this for obstacles, tables, platforms, "
+            "or anchored articulated bodies."
         ),
     )
     visualize_contact: bool = False
@@ -198,18 +198,6 @@ class BodyIR(StrictModel):
     )
     collision: CollisionIR = Field(default_factory=CollisionIR)
     actuators: tuple[ActuatorIR, ...] = ()
-
-    @model_validator(mode="before")
-    @classmethod
-    def _upgrade_static_alias(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        upgraded = dict(value)
-        if "static" in upgraded and "fixed" not in upgraded:
-            upgraded["fixed"] = upgraded.pop("static")
-        elif "static" in upgraded:
-            upgraded.pop("static")
-        return upgraded
 
     @model_validator(mode="after")
     def _check_fixed_support(self) -> "BodyIR":

@@ -9,7 +9,7 @@ from ..io_utils import dump_json
 from ..llm_critic import CriticEvaluationInput, evaluate_prompt_event_video
 from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 from ..llm_generator.constraints import parse_sanitize_validate
-from ..runtime import build_llm_event_pack, run_single_rigid_ir
+from ..runtime import build_llm_event_pack, run_rigid_ir
 from ..tool_library import GeneratorParameterOverrides
 from .feedback import build_generator_feedback_package
 
@@ -153,7 +153,7 @@ def optimize_prompt(
         else:
             previous_xml_text = None
 
-        raw_result = run_single_rigid_ir(validated_program, normalize=False)
+        raw_result = run_rigid_ir(validated_program, normalize=False)
         dump_json(raw_result, run_result_path)
 
         event_pack = build_llm_event_pack(validated_program, raw_result)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..ir_schema import SingleRigidIR
+from ..ir_schema import IR_VERSION, RigidIR
 from ..llm_generator.constraints.general_constraints import ALLOWED_OBSERVE_FIELDS, default_render_config
 from .overrides import GeneratorParameterOverrides
 
@@ -28,8 +28,8 @@ def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "get_single_rigid_ir_schema",
-                "description": "Return full JSON schema for SingleRigidIR.",
+                "name": "get_rigid_ir_schema",
+                "description": "Return full JSON schema for RigidIR.",
                 "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
             },
         },
@@ -43,7 +43,7 @@ def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
                     "properties": {
                         "candidate_ir": {
                             "type": "object",
-                            "description": "Candidate SingleRigidIR JSON object.",
+                            "description": "Candidate RigidIR JSON object.",
                         },
                         "normalize": {
                             "type": "boolean",
@@ -120,10 +120,10 @@ def build_generation_guide_payload(
             effective_render["fps"] = max(1, int(round(1.0 / (effective_dt * effective_render["render_every_n_steps"]))))
 
     constraints: dict[str, Any] = {
-        "ir_version": "genesis.single_rigid.v1",
+        "ir_version": IR_VERSION,
         "allowed_shape_kinds": ["sphere", "box", "cylinder", "mjcf", "urdf"],
         "multi_body_supported": True,
-        "root_structure_note": "Use top-level `bodies` list. The legacy single `body` object is deprecated.",
+        "root_structure_note": "Use top-level `bodies` list.",
         "body_count_policy": "Multiple bodies are allowed. At most one body may be articulated (mjcf or urdf).",
         "body_naming_policy": "Each body.name must be unique. Actions refer to bodies through the `entity` field.",
         "ir_conciseness_policy": (
@@ -133,8 +133,8 @@ def build_generation_guide_payload(
         ),
         "fixed_body_support": True,
         "fixed_body_note": (
-            "Use `bodies[].fixed=true` for static primitive or URDF objects such as obstacles, tables, and targets. "
-            "For MJCF bodies, encode a fixed base inside the XML itself. Input alias `static=true` is also accepted."
+            "Use `bodies[].fixed=true` for fixed primitive or URDF objects such as obstacles, tables, and targets. "
+            "For MJCF bodies, encode a fixed base inside the XML itself."
         ),
         "multi_entity_action_support": {
             "observe": (
@@ -214,9 +214,8 @@ def build_generation_guide_payload(
             "task-level motion design."
         ),
         "bodies[].fixed": (
-            "Whether a body is fixed/static in the world. Use this for primitive or URDF obstacles, tables, and props "
-            "that should not fall under gravity. For MJCF, express a fixed base in the XML itself. "
-            "Input alias `static` is also accepted."
+            "Whether a body is fixed in the world. Use this for primitive or URDF obstacles, tables, and props "
+            "that should not fall under gravity. For MJCF, express a fixed base in the XML itself."
         ),
         "bodies[].actuators[].kp": (
             "Position-control stiffness. Increasing kp makes tracking more aggressive, but if it is too large the "
@@ -356,7 +355,7 @@ def build_generation_guide_payload(
         },
     }
 
-    return {"ok": True, "mode": "general_single_rigid", "constraints": constraints, "templates": templates}
+    return {"ok": True, "mode": "general_rigid_scene", "constraints": constraints, "templates": templates}
 
 
 def build_observation_field_guide_payload() -> dict[str, Any]:
@@ -375,4 +374,4 @@ def build_observation_field_guide_payload() -> dict[str, Any]:
 
 
 def build_schema_payload() -> dict[str, Any]:
-    return {"ok": True, "schema": SingleRigidIR.model_json_schema()}
+    return {"ok": True, "schema": RigidIR.model_json_schema()}

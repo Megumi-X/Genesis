@@ -3,15 +3,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..ir_schema import SingleRigidIR, normalize_ir, parse_ir_payload
+from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
 from .action_dispatch import dispatch_action
 from .helpers import capture_entity_snapshot, finalize_recording
 from .models import RuntimeState
 from .setup import build_runtime_context, configure_headless_if_needed, create_runtime_context, ensure_genesis_initialized
 
 
-def run_single_rigid_ir(
-    program_or_payload: Mapping[str, Any] | SingleRigidIR,
+def run_rigid_ir(
+    program_or_payload: Mapping[str, Any] | RigidIR,
     *,
     normalize: bool = True,
 ) -> dict[str, Any]:

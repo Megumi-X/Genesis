@@ -72,7 +72,7 @@ def _sample_frames_ffmpeg(
 ) -> list[SampledFrame]:
     fps = 1.0 / sample_every_sec
 
-    with TemporaryDirectory(prefix="single_rigid_critic_") as tmp_dir:
+    with TemporaryDirectory(prefix="rigid_critic_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         frame_pattern = tmp_path / "frame_%03d.jpg"
         _run_cmd(

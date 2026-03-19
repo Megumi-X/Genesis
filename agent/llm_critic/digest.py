@@ -164,10 +164,6 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
     scene = ir.get("scene", {})
     bodies_any = ir.get("bodies", [])
     bodies = [body for body in bodies_any if isinstance(body, dict)] if isinstance(bodies_any, list) else []
-    if not bodies:
-        legacy_body = ir.get("body")
-        if isinstance(legacy_body, dict):
-            bodies = [legacy_body]
     actions_any = ir.get("actions", [])
     actions = [action for action in actions_any if isinstance(action, dict)] if isinstance(actions_any, list) else []
 

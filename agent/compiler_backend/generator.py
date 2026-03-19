@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..ir_schema import SingleRigidIR, normalize_ir, parse_ir_payload
+from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
 from .emit_actions import emit_action_loop
 from .emit_actuators import emit_actuator_setup
 from .emit_scene import emit_scene_setup
@@ -12,16 +12,16 @@ from .runtime_helpers_source import runtime_helpers_source
 
 
 @dataclass(frozen=True)
-class CompiledSingleRigidArtifact:
-    program: SingleRigidIR
+class CompiledRigidArtifact:
+    program: RigidIR
     source: str
 
 
-def compile_single_rigid_ir_to_source(
-    program_or_payload: dict[str, Any] | SingleRigidIR,
+def compile_rigid_ir_to_source(
+    program_or_payload: dict[str, Any] | RigidIR,
     *,
     function_name: str = "run",
-) -> CompiledSingleRigidArtifact:
+) -> CompiledRigidArtifact:
     program = normalize_ir(parse_ir_payload(program_or_payload))
     lines: list[str] = []
 
@@ -56,14 +56,14 @@ def compile_single_rigid_ir_to_source(
         )
     emit(1, "}")
     lines.extend(["", "", "if __name__ == '__main__':", f"    print(json.dumps({function_name}(), indent=2))"])
-    return CompiledSingleRigidArtifact(program=program, source="\n".join(lines))
+    return CompiledRigidArtifact(program=program, source="\n".join(lines))
 
 
-def compile_single_rigid_ir_to_file(
-    program_or_payload: dict[str, Any] | SingleRigidIR,
+def compile_rigid_ir_to_file(
+    program_or_payload: dict[str, Any] | RigidIR,
     output_path: str | Path,
-) -> CompiledSingleRigidArtifact:
-    artifact = compile_single_rigid_ir_to_source(program_or_payload=program_or_payload)
+) -> CompiledRigidArtifact:
+    artifact = compile_rigid_ir_to_source(program_or_payload=program_or_payload)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(artifact.source, encoding="utf-8")

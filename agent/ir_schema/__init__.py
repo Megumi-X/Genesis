@@ -23,7 +23,7 @@ from .body import (
     URDFShapeIR,
 )
 from .common import IR_VERSION, QuatWXYZ, ScalarOrSequence, StrictModel, Vec3
-from .program import SingleRigidIR, normalize_ir, parse_ir_payload
+from .program import RigidIR, normalize_ir, parse_ir_payload
 from .scene import CollisionIR, FollowEntityCameraIR, PoseIR, RenderIR, SceneIR, SimIR, ViewerIR
 
 __all__ = [
@@ -59,7 +59,7 @@ __all__ = [
     "SetTargetPosActionIR",
     "SetTorqueActionIR",
     "ActionIR",
-    "SingleRigidIR",
+    "RigidIR",
     "parse_ir_payload",
     "normalize_ir",
 ]

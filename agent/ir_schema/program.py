@@ -26,25 +26,14 @@ def _selected_entities(entity: str | tuple[str, ...] | None) -> tuple[str, ...]:
     return entity
 
 
-class SingleRigidIR(StrictModel):
+class RigidIR(StrictModel):
     ir_version: Literal[IR_VERSION] = IR_VERSION
     scene: SceneIR = Field(default_factory=SceneIR)
     bodies: list[BodyIR] = Field(min_length=1)
     actions: list[ActionIR] = Field(default_factory=list)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _upgrade_single_body_root(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        if "bodies" in value or "body" not in value:
-            return value
-        upgraded = dict(value)
-        upgraded["bodies"] = [upgraded.pop("body")]
-        return upgraded
-
     @model_validator(mode="after")
-    def _check_references(self) -> "SingleRigidIR":
+    def _check_references(self) -> "RigidIR":
         body_names: set[str] = set()
         bodies_by_name: dict[str, BodyIR] = {}
         articulated_bodies: list[BodyIR] = []
@@ -160,13 +149,13 @@ class SingleRigidIR(StrictModel):
         return self
 
 
-def parse_ir_payload(payload: Mapping[str, Any] | SingleRigidIR) -> SingleRigidIR:
-    if isinstance(payload, SingleRigidIR):
+def parse_ir_payload(payload: Mapping[str, Any] | RigidIR) -> RigidIR:
+    if isinstance(payload, RigidIR):
         return payload
-    return SingleRigidIR.model_validate(payload)
+    return RigidIR.model_validate(payload)
 
 
-def normalize_ir(program_or_payload: Mapping[str, Any] | SingleRigidIR) -> SingleRigidIR:
+def normalize_ir(program_or_payload: Mapping[str, Any] | RigidIR) -> RigidIR:
     program = parse_ir_payload(program_or_payload).model_copy(deep=True)
     for body in program.bodies:
         body.initial_pose.quat = normalize_quat(body.initial_pose.quat)

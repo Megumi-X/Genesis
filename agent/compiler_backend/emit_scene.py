@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from ..ir_schema import RenderIR, SingleRigidIR
+from ..ir_schema import RenderIR, RigidIR
 from .formatting import fmt_tuple, safe_var_name
 from .morph_material import body_morph_source, emit_collision_overrides, material_kwargs_from_collision
 
@@ -15,7 +15,7 @@ class SceneEmitContext:
     body_vars: dict[str, str]
 
 
-def emit_scene_setup(emit: Callable[[int, str], None], program: SingleRigidIR) -> SceneEmitContext:
+def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> SceneEmitContext:
     backend_expr = "gs.cpu" if program.scene.backend == "cpu" else "gs.gpu"
     if not program.scene.show_viewer:
         emit(1, 'os.environ.setdefault("PYOPENGL_PLATFORM", "egl")')

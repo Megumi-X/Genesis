@@ -40,6 +40,7 @@ XML_SYSTEM_PROMPT = (
     "Do not add ground planes, tables, lights, cameras, or any other background/environment elements. "
     "Under `<worldbody>`, include only the robot root `<body>` tree. "
     "Do not include `<actuator>` blocks or actuator tags under `<default>`; actuator definitions belong to IR. "
+    "Do not include `<contact><exclude .../></contact>` blocks. "
     "Do not wrap XML in markdown fences."
 )
 
@@ -186,6 +187,25 @@ def _strip_worldbody_background(root: ET.Element) -> bool:
     return changed
 
 
+def _strip_contact_excludes(root: ET.Element) -> bool:
+    changed = False
+    stack = [root]
+    while stack:
+        parent = stack.pop()
+        for child in list(parent):
+            if child.tag == "contact":
+                for grandchild in list(child):
+                    if grandchild.tag == "exclude":
+                        child.remove(grandchild)
+                        changed = True
+                if len(child) == 0:
+                    parent.remove(child)
+                    changed = True
+                    continue
+            stack.append(child)
+    return changed
+
+
 def _sanitize_mjcf(xml_content: str) -> str:
     try:
         root = ET.fromstring(xml_content)
@@ -194,6 +214,7 @@ def _sanitize_mjcf(xml_content: str) -> str:
 
     changed = _strip_actuator_tags(root)
     changed = _strip_worldbody_background(root) or changed
+    changed = _strip_contact_excludes(root) or changed
     if not changed:
         return xml_content
 
@@ -210,6 +231,7 @@ def _build_user_prompt(task: str, *, previous_error: str | None = None, file_ste
         "- Under `<worldbody>`, include only the robot root `<body>` tree.",
         "- Include at least one movable joint.",
         "- Do not include `<actuator>` blocks or actuator-default tags under `<default>`.",
+        "- Do not include `<contact><exclude .../></contact>` blocks.",
         "- Use reasonable inertial/geom defaults for stable simulation.",
         "",
         "Task:",
@@ -247,7 +269,7 @@ def _build_revision_prompt(
 
 def _build_prompt_cache_key() -> str:
     digest = hashlib.sha1(XML_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
-    return f"single_rigid_xml_agent:{digest}"
+    return f"rigid_xml_agent:{digest}"
 
 
 def generate_articulated_xml_with_openai(

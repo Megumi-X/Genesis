@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ..ir_schema import SingleRigidIR
+from ..ir_schema import RigidIR
 from ..llm_generator.constraints.general_constraints import parse_sanitize_validate
 from .overrides import GeneratorParameterOverrides, apply_generator_parameter_overrides
 from .program_constraints import validate_program_constraints
@@ -53,7 +53,7 @@ class GeneralIRAgentToolLibrary:
         self._tool_funcs: dict[str, ToolFunc] = {
             "get_generation_guide": self._get_generation_guide,
             "get_observation_field_guide": self._get_observation_field_guide,
-            "get_single_rigid_ir_schema": self._get_single_rigid_ir_schema,
+            "get_rigid_ir_schema": self._get_rigid_ir_schema,
             "validate_ir": self._validate_ir,
         }
         if self.xml_generation_fn is not None:
@@ -74,7 +74,7 @@ class GeneralIRAgentToolLibrary:
 
     def validate_program_constraints(
         self,
-        program: SingleRigidIR,
+        program: RigidIR,
         *,
         target_sim_duration_sec: float | None = None,
         sim_duration_tolerance_sec: float | None = None,
@@ -101,7 +101,7 @@ class GeneralIRAgentToolLibrary:
     def generated_xml_result(self) -> XMLGenerationResult | None:
         return self._generated_xml_result
 
-    def apply_parameter_overrides(self, program: SingleRigidIR) -> SingleRigidIR:
+    def apply_parameter_overrides(self, program: RigidIR) -> RigidIR:
         return apply_generator_parameter_overrides(program, self.parameter_overrides)
 
     @staticmethod
@@ -134,7 +134,7 @@ class GeneralIRAgentToolLibrary:
         return build_observation_field_guide_payload()
 
     @staticmethod
-    def _get_single_rigid_ir_schema(_: dict[str, Any]) -> dict[str, Any]:
+    def _get_rigid_ir_schema(_: dict[str, Any]) -> dict[str, Any]:
         return build_schema_payload()
 
     def _generate_articulated_xml(self, args: dict[str, Any]) -> dict[str, Any]:

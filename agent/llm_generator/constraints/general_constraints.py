@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...ir_schema import SingleRigidIR, normalize_ir, parse_ir_payload
+from ...ir_schema import RigidIR, normalize_ir, parse_ir_payload
 from .observation_policy import ALLOWED_OBSERVE_FIELDS, validate_observation_policy
 from .payload_normalization import GeneralIRValidationError, extract_first_json_object, sanitize_payload
 from .render_defaults import (
@@ -13,11 +13,11 @@ from .render_defaults import (
 
 
 def parse_sanitize_validate(
-    payload_or_program: dict[str, object] | SingleRigidIR,
+    payload_or_program: dict[str, object] | RigidIR,
     *,
     normalize: bool = True,
-) -> SingleRigidIR:
-    if isinstance(payload_or_program, SingleRigidIR):
+) -> RigidIR:
+    if isinstance(payload_or_program, RigidIR):
         program = payload_or_program
     else:
         sanitized = sanitize_payload(apply_default_render_to_payload(dict(payload_or_program)))

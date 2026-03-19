@@ -3,14 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from ..ir_schema import SingleRigidIR
+from ..ir_schema import RigidIR
 from .actuators import configure_actuators
 from .builders import apply_collision_overrides, build_body_morph, build_rigid_material
 from .helpers import get_follow_target_entity
 from .models import RuntimeContext, RuntimeState
 
 
-def _configure_follow_camera(program: SingleRigidIR, runtime: RuntimeContext) -> None:
+def _configure_follow_camera(program: RigidIR, runtime: RuntimeContext) -> None:
     render = runtime.render
     camera = runtime.camera
     if render is None or camera is None or render.follow_entity is None:
@@ -29,14 +29,14 @@ def _configure_follow_camera(program: SingleRigidIR, runtime: RuntimeContext) ->
     )
 
 
-def configure_headless_if_needed(program: SingleRigidIR) -> None:
+def configure_headless_if_needed(program: RigidIR) -> None:
     if not program.scene.show_viewer:
         os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
         os.environ.setdefault("MUJOCO_GL", "egl")
         os.environ.setdefault("PYGLET_HEADLESS", "1")
 
 
-def ensure_genesis_initialized(gs: Any, program: SingleRigidIR) -> None:
+def ensure_genesis_initialized(gs: Any, program: RigidIR) -> None:
     requested_backend = gs.cpu if program.scene.backend == "cpu" else gs.gpu
     if getattr(gs, "_initialized", False):
         active_backend = getattr(gs, "backend", None)
@@ -49,7 +49,7 @@ def ensure_genesis_initialized(gs: Any, program: SingleRigidIR) -> None:
     gs.init(backend=requested_backend)
 
 
-def create_runtime_context(gs: Any, program: SingleRigidIR) -> RuntimeContext:
+def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
     viewer_options = None
     if program.scene.viewer is not None:
         viewer = program.scene.viewer
@@ -116,7 +116,7 @@ def create_runtime_context(gs: Any, program: SingleRigidIR) -> RuntimeContext:
     )
 
 
-def build_runtime_context(program: SingleRigidIR, runtime: RuntimeContext, state: RuntimeState) -> None:
+def build_runtime_context(program: RigidIR, runtime: RuntimeContext, state: RuntimeState) -> None:
     for body in program.bodies:
         apply_collision_overrides(runtime.body_entities[body.name], body.collision)
     if program.scene.add_ground:

@@ -5,7 +5,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
-IR_VERSION = "genesis.single_rigid.v1"
+IR_VERSION = "genesis.rigid.v1"
 
 Vec3 = tuple[float, float, float]
 QuatWXYZ = tuple[float, float, float, float]
@@ -53,4 +53,3 @@ def normalize_quat(quat: QuatWXYZ) -> QuatWXYZ:
         raise ValueError("Quaternion norm is zero; cannot normalize.")
     normalized = tuple(component / norm for component in quat)
     return cast(QuatWXYZ, normalized)
-

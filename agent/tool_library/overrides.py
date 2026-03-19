@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from ..ir_schema import CollisionIR, SingleRigidIR
+from ..ir_schema import CollisionIR, RigidIR
 from ..llm_generator.constraints import ensure_program_has_render, synchronize_render_timing
 
 
@@ -20,9 +20,9 @@ class GeneratorParameterOverrides:
 
 
 def apply_generator_parameter_overrides(
-    program: SingleRigidIR,
+    program: RigidIR,
     overrides: GeneratorParameterOverrides | None,
-) -> SingleRigidIR:
+) -> RigidIR:
     if overrides is None:
         return program
 

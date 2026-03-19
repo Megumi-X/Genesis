@@ -61,7 +61,7 @@ class FollowEntityCameraIR(StrictModel):
 
 
 class RenderIR(StrictModel):
-    output_video: str = "single_rigid.mp4"
+    output_video: str = "rigid.mp4"
     fps: int = Field(default=60, ge=1, le=240)
     res: tuple[int, int] = (640, 480)
     camera_pos: Vec3 = (3.5, 0.5, 2.5)

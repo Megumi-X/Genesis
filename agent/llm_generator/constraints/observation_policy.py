@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ...ir_schema import ObserveActionIR, SingleRigidIR, StepActionIR
+from ...ir_schema import ObserveActionIR, RigidIR, StepActionIR
 from .payload_normalization import GeneralIRValidationError
 
 ALLOWED_OBSERVE_FIELDS = {"pos", "quat", "vel", "ang", "qpos", "dofs_position", "dofs_velocity"}
 
 
-def validate_observation_policy(program: SingleRigidIR) -> None:
+def validate_observation_policy(program: RigidIR) -> None:
     for idx, action in enumerate(program.actions):
         if not isinstance(action, ObserveActionIR):
             continue
@@ -47,7 +47,7 @@ def _required_observation_count(final_step: int) -> int:
     return 3
 
 
-def _observation_schedule(program: SingleRigidIR) -> tuple[list[int], int]:
+def _observation_schedule(program: RigidIR) -> tuple[list[int], int]:
     sim_step = 0
     observe_steps: list[int] = []
     for action in program.actions:

@@ -97,7 +97,7 @@ Use only provided evidence. Do not invent unseen details.
 
 def build_critic_prompt_cache_key() -> str:
     digest = hashlib.sha1(CRITIC_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
-    return f"single_rigid_critic:{digest}"
+    return f"rigid_critic:{digest}"
 
 
 def build_critic_user_content(

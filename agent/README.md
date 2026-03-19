@@ -6,11 +6,12 @@ The current system supports:
 
 - multiple primitive bodies
 - at most one articulated body (`mjcf` or `urdf`)
-- body-level `fixed` / `static` support for primitives and URDF
+- body-level `fixed` support for primitives and URDF
 - multi-entity actions for `observe`, `set_pose`, and `apply_external_wrench`
 - direct execution, code generation, LLM generation, multimodal critique, and iterative optimization
 
-The public IR class name is still `SingleRigidIR` for compatibility, but the actual root structure now uses top-level `bodies`.
+The public IR class name is `RigidIR`, and the root structure uses top-level `bodies`.
+Old payload forms such as top-level `body` or body-level `static` are no longer accepted.
 
 ## Directory Layout
 
@@ -55,7 +56,7 @@ Current articulated policy:
 - multiple primitive bodies are allowed
 - at most one articulated body is allowed
 
-### Fixed / Static Bodies
+### Fixed Bodies
 
 Use `fixed: true` for:
 
@@ -64,8 +65,6 @@ Use `fixed: true` for:
 - platforms
 - static targets
 - anchored URDF bodies
-
-`static: true` is accepted as an input alias and normalized to `fixed: true`.
 
 Important limitation:
 
@@ -138,7 +137,7 @@ Top-level structure includes:
 - `observations`
 - `highlights`
 
-For single-body compatibility, a legacy top-level `entity` field may still appear when exactly one body exists. New code should prefer `entities`.
+Use `entities` as the top-level body summary in the event pack.
 
 Useful observation indexes:
 
@@ -309,7 +308,7 @@ These scripts:
 
 ## Key Constraints and Notes
 
-- class name remains `SingleRigidIR`, but root IR field is `bodies`
+- IR class name is `RigidIR`, and the root IR field is `bodies`
 - current support is multiple primitive bodies plus at most one articulated body
 - `fixed=true` is supported for primitives and URDF, not for MJCF
 - `set_pose`, `set_dofs_position`, and `set_dofs_velocity` are intended for pre-simulation use only

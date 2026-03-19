@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..ir_schema import SingleRigidIR
+from ..ir_schema import RigidIR
 from .formatting import fmt_int_tuple, fmt_scalar_or_tuple, fmt_str_tuple
 
 
 def emit_actuator_setup(
     emit: Callable[[int, str], None],
     *,
-    program: SingleRigidIR,
+    program: RigidIR,
     body_vars: dict[str, str],
 ) -> None:
     emit(1, "actuators = {}")

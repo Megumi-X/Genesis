@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from ...ir_schema import SingleRigidIR
+from ...ir_schema import RigidIR
 from ..client import OpenAIResponsesClient, coerce_content_to_text
 from ..constraints.general_constraints import extract_first_json_object, parse_sanitize_validate
 from ...tool_library import GeneralIRAgentToolLibrary
@@ -29,7 +29,7 @@ class IRGenerationRoundLog:
 class IRGenerationResult:
     model: str
     rounds: int
-    program: SingleRigidIR
+    program: RigidIR
     ir_json: dict[str, Any]
     logs: list[IRGenerationRoundLog]
 
@@ -63,9 +63,9 @@ def _tool_result_message(tool_call_id: str, name: str, result: dict[str, Any]) -
 def _build_user_prompt(task: str, *, additional_requirements: str | None = None) -> str:
     lines = [
         "Process requirements:",
-        "- Call get_generation_guide and get_single_rigid_ir_schema first.",
+        "- Call get_generation_guide and get_rigid_ir_schema first.",
         "- Call get_observation_field_guide before finalizing observe actions.",
-        "- Use top-level `bodies` list, not legacy single `body` root.",
+        "- Use top-level `bodies` list.",
         "- Use `bodies[].fixed=true` for static primitive or URDF props, targets, and supports. For MJCF, express a fixed base in the XML itself.",
         "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",
         "- Keep the IR as concise as possible without changing behavior; merge repeated `observe`, `set_pose`, or `apply_external_wrench` actions into one action with an `entity` list whenever the payload and timing are identical.",
@@ -128,7 +128,7 @@ def _build_prompt_cache_key(tool_specs: list[dict[str, Any]]) -> str:
         "tools": tool_specs,
     }
     digest = hashlib.sha1(json.dumps(signature, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    return f"single_rigid_ir_agent:{digest}"
+    return f"rigid_ir_agent:{digest}"
 
 
 def _build_hosted_prompt_ref(

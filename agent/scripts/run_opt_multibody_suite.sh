@@ -153,14 +153,16 @@ while IFS='|' read -r case_id task; do
   [[ "${case_id:0:1}" == "#" ]] && continue
   run_case "$case_id" "$task"
 done <<'CASES'
-newtons_cradle|Create a newton cradle with five suspended equal small spheres, and launch one matching sphere into the row so the impact transfers through the line. Render the whole interaction for 6s.
-wedge_and_rolling_sphere|Create a fixed inclined wedge and a small movable sphere that starts near the top and rolls or slides down the incline, then hits a second primitive body at the bottom. Render 6s.
-mobile_robot_corridor_box|Create a simple wheeled mobile robot, two fixed wall-like obstacle boxes forming a corridor, and one movable box at the far end. Render an 8s open-loop sequence where the robot drives straight through the corridor and contacts the movable box with a follow camera.
-scara_table_box|Generate a SCARA robot anchored in the world, plus a fixed table and one movable box on the table. Render an 8s sequence where the arm moves through two or three clear open-loop poses above the table and near the box, without requiring grasping or closed-loop tracking.
-forklift_pallet_platform|Generate a forklift-like articulated vehicle, one movable pallet box, and one fixed loading platform. Render an 8s open-loop sequence where the forklift drives forward while raising its fork assembly and passes close to the pallet and platform.
-excavator_with_debris|Create an excavator-style articulated arm on a fixed or anchored base, plus two primitive debris objects and one fixed ground-side barrier. Render an 8s open-loop digging-like motion where the arm sweeps near the debris and barrier without destabilizing the whole scene.
-arm_and_targets|Generate a simple articulated arm anchored in the world, plus two fixed target spheres and one movable block. Render 8s where the arm moves through several open-loop poses that pass near the two targets while the block remains a separate body in the scene.
-robot_push_box|Generate a compact differential-drive robot, one movable box, and one fixed wall behind the box. Render an 8s sequence where the robot drives toward the box and pushes it toward the wall while staying upright.
+box_pyramid_impact|Create a compact pyramid of small boxes resting on the ground, then launch one dense sphere at high speed into the lower layer so the pyramid collapses and scatters over 6s.
+sphere_rack_break|Create a tightly packed triangular rack of equal small spheres on the ground and launch one cue sphere at high speed into the rack to produce a billiards-style break over 6s.
+box_wall_breach|Create a short wall built from several stacked boxes and launch a heavy rectangular projectile into the center so the wall breaks apart and collapses over 6s.
+block_arch_collapse|Create a simple freestanding arch from rectangular blocks on the ground, then send a fast small sphere into one side so the arch loses support and collapses over 6s.
+mixed_bodies_on_slope|Create a fixed inclined plane with several spheres, boxes, and cylinders initially resting near the top, then let them move down the slope together, colliding, sliding, and rolling into each other over 6s.
+cylinder_cluster_scatter|Create a dense cluster of upright cylinders on the ground and launch one fast box through the cluster so the cylinders topple and scatter over 6s.
+offset_box_stack_settle|Create a tall stack of boxes with small alternating horizontal offsets so the stack is near the edge of stability, then simulate the settling and eventual toppling behavior over 6s.
+rubble_pile_impact|Create an irregular pile of mixed boxes and cylinders on the ground and launch one dense sphere into the pile so the bodies rearrange, topple, and scatter over 6s.
+bin_fill_scatter|Create a fixed open-top bin from several static box walls, place a group of small spheres above it, and let them fall into the bin while colliding with each other and with the walls over 6s.
+plank_bridge_failure|Create a narrow bridge made from several thin boxes spanning between two fixed supports, then drop a dense sphere onto the bridge so the planks shift and the bridge collapses over 6s.
 CASES
 
 echo "Done. Results are under: $RUN_ROOT"

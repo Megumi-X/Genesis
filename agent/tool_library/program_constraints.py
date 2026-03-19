@@ -8,13 +8,13 @@ from ..ir_schema import (
     SetPoseActionIR,
     SetTargetPosActionIR,
     SetTorqueActionIR,
-    SingleRigidIR,
+    RigidIR,
     StepActionIR,
 )
 
 
 def validate_program_constraints(
-    program: SingleRigidIR,
+    program: RigidIR,
     *,
     required_shape_kind: str | None = None,
     required_shape_file: str | None = None,
@@ -99,7 +99,7 @@ def _selected_entities(entity: str | tuple[str, ...] | None) -> tuple[str, ...]:
 
 
 def _validate_articulated_actuator_control(
-    program: SingleRigidIR,
+    program: RigidIR,
     allowed_articulated_joint_names: tuple[str, ...] | None,
 ) -> list[str]:
     errors: list[str] = []

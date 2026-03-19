@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 
-from ...ir_schema import RenderIR, SingleRigidIR
+from ...ir_schema import RenderIR, RigidIR
 
 DEFAULT_RENDER_VIDEO_PATH = "agent/runs/llm_generated/render.mp4"
 
@@ -56,10 +56,10 @@ def apply_default_render_to_payload(
 
 
 def ensure_program_has_render(
-    program: SingleRigidIR,
+    program: RigidIR,
     *,
     output_video: str | None = None,
-) -> SingleRigidIR:
+) -> RigidIR:
     patched = program.model_copy(deep=True)
     if patched.scene.render is None:
         patched.scene.render = RenderIR.model_validate(default_render_config(output_video=output_video))
@@ -70,7 +70,7 @@ def ensure_program_has_render(
     return patched
 
 
-def synchronize_render_timing(program: SingleRigidIR) -> SingleRigidIR:
+def synchronize_render_timing(program: RigidIR) -> RigidIR:
     patched = program.model_copy(deep=True)
     render = patched.scene.render
     if render is None:
